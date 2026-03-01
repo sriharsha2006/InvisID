@@ -1,29 +1,45 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-import logging
+from datetime import datetime, timezone
 import sys
 import os
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.routers import admin, images, jobs
+from app.utils.logging import setup_logging, get_logger
+from app.config import get_settings
+from app.models.schemas import HealthResponse
+
+# Initialize settings and structured logging
+settings = get_settings()
+setup_logging(level=settings.LOG_LEVEL)
+logger = get_logger("app.main")
 
 app = FastAPI(
     title="InvisID API",
-    description="Leak Attribution System for Sensitive Images",
+    description="""
+    Leak Attribution System for Sensitive Images.
+    
+    This API provides tools for:
+    * **Administrators**: Uploading master images and investigating leaks.
+    * **Employees**: Downloading watermarked images for legitimate use.
+    """,
     version="1.0.0",
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json"
 )
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Global exception handler to prevent stack traces in responses."""
-    logger.error(f"Global error: {str(exc)}", exc_info=True)
+    logger.error(
+        f"Global error on {request.url.path}: {str(exc)}", 
+        exc_info=True,
+        extra={"url": str(request.url), "method": request.method}
+    )
     return JSONResponse(
         status_code=500,
         content={"detail": "An internal server error occurred. Please contact support."},
@@ -40,18 +56,24 @@ app.include_router(admin.router, prefix="/api")
 app.include_router(images.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 
-
-@app.get("/")
+@app.get("/", tags=["system"])
 async def root():
+    """Welcome endpoint."""
     return {"message": "InvisID API", "status": "running"}
 
-
-@app.get("/health")
+@app.get("/health", response_model=HealthResponse, tags=["system"])
 async def health_check():
-    return {"status": "healthy"}
-
+    """Enhanced health check with storage status."""
+    storage_ok = os.access(settings.UPLOAD_DIR, os.W_OK)
+    
+    status = "healthy" if storage_ok else "unhealthy"
+    
+    return {
+        "status": status,
+        "storage_ok": storage_ok,
+        "timestamp": datetime.now(timezone.utc)
+    }
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000)

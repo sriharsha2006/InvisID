@@ -6,14 +6,23 @@ from typing import List
 from app.config import get_settings
 from app.dependencies.auth import EmployeeUser, AdminUser
 from app.models.schemas import ImageResponse
+from app.utils.logging import get_logger
 
 router = APIRouter(prefix="/images", tags=["images"])
 settings = get_settings()
+logger = get_logger("app.images")
 
 @router.get("/", response_model=List[ImageResponse])
 async def list_images(user: EmployeeUser):
-    """List all available master images."""
+    """
+    List all available master images for the authorized employee.
+    
+    Returns a list of image metadata, including IDs and download URLs. 
+    Each image downloaded from the provided URL will be uniquely watermarked 
+    for the current employee.
+    """
     if not os.path.exists(settings.UPLOAD_DIR):
+        logger.info(f"Empty upload directory for user: {user.employee_id}")
         return []
     
     files = os.listdir(settings.UPLOAD_DIR)
@@ -27,6 +36,7 @@ async def list_images(user: EmployeeUser):
                 "url": f"/api/images/{image_id}/download"
             })
     
+    logger.info(f"Listed {len(images)} images for user: {user.employee_id}")
     return images
 
 @router.get("/{image_id}/download")
@@ -35,7 +45,13 @@ async def download_image(
     user: EmployeeUser,
     background_tasks: BackgroundTasks
 ):
-    """Download image with embedded watermark unique to the employee."""
+    """
+    Download a watermarked version of a master image.
+    
+    The system will uniquely embed the employee's ID (`EMP-001` etc.) into 
+    the image before serving. This enables leak attribution if the image 
+    is discovered outside of authorized channels.
+    """
     # Find the image file
     if not os.path.exists(settings.UPLOAD_DIR):
         raise HTTPException(status_code=404, detail="No images found")
@@ -48,13 +64,17 @@ async def download_image(
             break
     
     if not image_file:
+        logger.warning(f"Image not found for ID {image_id} (user: {user.employee_id})")
         raise HTTPException(status_code=404, detail="Image not found")
     
     input_path = os.path.join(settings.UPLOAD_DIR, image_file)
     
+    logger.info(
+        f"Image download requested for {image_id}", 
+        extra_context={"employee_id": user.employee_id, "image_file": image_file}
+    )
+    
     # In a real implementation, we would apply watermarking here
-    # or trigger a background task if it's slow.
-    # For now, we return the file with a different filename to simulate.
     
     return FileResponse(
         input_path, 

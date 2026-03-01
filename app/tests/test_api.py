@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 import pytest
 import os
 import shutil
+import re
 
 from app.main import app
 from app.config import get_settings
@@ -17,7 +18,11 @@ def test_read_root():
 def test_health_check():
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy"}
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert "storage_ok" in data
+    assert "timestamp" in data
+    assert data["storage_ok"] is True
 
 def test_unauthorized_upload():
     response = client.post("/api/admin/upload")
@@ -46,6 +51,7 @@ def test_admin_upload_valid():
     assert response.status_code == 200
     data = response.json()
     assert "id" in data
+    assert re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", data["id"])
     assert data["status"] == "uploaded"
     
     os.remove(image_path)
@@ -78,6 +84,7 @@ def test_investigate_start():
     assert response.status_code == 200
     data = response.json()
     assert "job_id" in data
+    assert re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", data["job_id"])
     assert data["status"] == "processing"
     
     os.remove(image_path)

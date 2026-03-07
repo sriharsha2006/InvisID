@@ -2,7 +2,7 @@ from imwatermark import WatermarkEncoder, WatermarkDecoder
 import cv2
 import re
 
-PAYLOAD_SIZE = 32
+PAYLOAD_SIZE = 64
 
 
 def embed_watermark(input_path: str, watermark_data: str, output_path: str) -> str:
@@ -14,16 +14,17 @@ def embed_watermark(input_path: str, watermark_data: str, output_path: str) -> s
 
     encoder = WatermarkEncoder()
 
-    payload = watermark_data.ljust(PAYLOAD_SIZE)
+    # Repeat watermark to strengthen signal
+    payload = (watermark_data + "|") * 10
+    payload = payload[:PAYLOAD_SIZE]
 
-    encoder.set_watermark("bytes", payload.encode("utf-8"))
+    encoder.set_watermark("bytes", payload.encode())
 
-    # stronger algorithm
-    watermarked_img = encoder.encode(img, "dwtDctSvd")
+    watermarked = encoder.encode(img, "dwtDctSvd")
 
     print("WATERMARK EMBEDDED:", watermark_data)
 
-    cv2.imwrite(output_path, watermarked_img)
+    cv2.imwrite(output_path, watermarked)
 
     return output_path
 
@@ -37,26 +38,24 @@ def extract_watermark(image_path: str) -> str:
 
     decoder = WatermarkDecoder("bytes", PAYLOAD_SIZE)
 
-    try:
+    watermark = decoder.decode(img, "dwtDctSvd")
 
-        watermark = decoder.decode(img, "dwtDctSvd")
+    decoded = watermark.decode(errors="ignore")
+    decoded = decoded.replace("\x00", "")
 
-        decoded = watermark.decode("utf-8", errors="ignore")
-        decoded = decoded.replace("\x00", "").strip()
+    print("RAW WATERMARK:", decoded)
 
-        print("RAW WATERMARK:", decoded)
+    matches = re.findall(r"EMP-\d+", decoded)
 
-        match = re.search(r"EMP-\d+", decoded)
+    if matches:
 
-        if match:
-            employee_id = match.group(0)
-            print("EXTRACTED EMPLOYEE:", employee_id)
-            return employee_id
+        # majority vote
+        employee_id = max(set(matches), key=matches.count)
 
-        print("NO EMPLOYEE ID FOUND")
+        print("EXTRACTED EMPLOYEE:", employee_id)
 
-        return ""
+        return employee_id
 
-    except Exception as e:
-        print("DECODING ERROR:", e)
-        return ""
+    print("NO EMPLOYEE ID FOUND")
+
+    return ""
